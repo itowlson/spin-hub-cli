@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 const DEV_SITE_BASE: &'static str = "https://developer.fermyon.com";
 
 fn index_url() -> url::Url {
@@ -26,7 +28,7 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct IndexEntry {
     title: String,
     summary: String,
@@ -43,6 +45,10 @@ const SHORT_SUMMARY_LEN: usize = 60;
 impl IndexEntry {
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    pub fn summary(&self) -> &str {
+        &self.summary
     }
 
     pub fn short_summary(&self) -> String {
@@ -74,8 +80,12 @@ impl IndexEntry {
         Category::parse(&self.category)
     }
 
-    pub fn tags(&self) -> &[String] {
-        &self.tags
+    pub fn tags(&self) -> Vec<String> {
+        self.tags.iter().map(|t| t.to_lowercase()).collect_vec()
+    }
+
+    pub fn title_words(&self) -> Vec<String> {
+        self.title.split_whitespace().map(|t| t.to_lowercase()).collect_vec()
     }
 }
 
