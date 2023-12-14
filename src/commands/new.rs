@@ -55,7 +55,7 @@ impl NewCommand {
 
         match matches.len() {
             0 => {
-                println!("No templates matches your search terms");
+                println!("No templates match your search terms");
                 return Ok(None);
             }
             1 => {
