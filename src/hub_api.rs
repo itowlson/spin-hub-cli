@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-const DEV_SITE_BASE: &'static str = "https://developer.fermyon.com";
+const DEV_SITE_BASE: &'static str = "http://127.0.0.1:3000";
 
 fn index_url() -> url::Url {
     url::Url::parse(DEV_SITE_BASE)
@@ -36,6 +36,9 @@ pub struct IndexEntry {
     language: String,
     author: String,
     tags: Vec<String>,
+    url: String,
+    id: String,
+    command: String,
     #[allow(dead_code)]
     path: String,
 }
@@ -86,6 +89,15 @@ impl IndexEntry {
 
     pub fn title_words(&self) -> Vec<String> {
         self.title.split_whitespace().map(|t| t.to_lowercase()).collect_vec()
+    }
+    pub fn url(&self) -> String {
+        self.url.clone()
+    }
+    pub fn id(&self) -> String {
+        self.id.clone()  // Add this method
+    }
+    pub fn command(&self) -> String {
+        self.command.clone()
     }
 }
 

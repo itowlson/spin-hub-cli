@@ -1,21 +1,37 @@
 use std::path::PathBuf;
-
-use clap::{Parser};
+use clap::{Parser, ArgGroup};
 use itertools::Itertools;
-
 use crate::hub_api;
 
 #[derive(Parser, Debug)]
 #[clap(about = "Create an application from a template on the Hub")]
+#[clap(group(
+    ArgGroup::new("operation")
+        .required(true)
+        .args(&["list", "name"])
+))]
 pub struct NewCommand {
     #[clap(short = 't')]
     terms: Vec<String>,
 
-    name: String,
+    #[clap(short, long)]
+    list: bool,
+
+    #[clap(name = "name", help = "Name of the application to create from the template")]
+    name: Option<String>,
 }
 
 impl NewCommand {
     pub async fn run(&self) -> anyhow::Result<()> {
+        if self.list {
+            return self.list_templates().await;
+        }
+
+        if self.name.is_none() {
+            println!("Please provide a name for the application you want to create.");
+            return Ok(());
+        }
+
         let Some(index_entry) = self.resolve_selection().await? else {
             return Ok(());
         };
@@ -28,21 +44,39 @@ impl NewCommand {
         self.run_template(repo, id).await
     }
 
+    async fn list_templates(&self) -> anyhow::Result<()> {
+        let entries = hub_api::index().await.unwrap();
+        let matches = entries.iter()
+            .filter(|e| self.is_terms_match(e))
+            .sorted_by_key(|e| e.title())
+            .collect_vec();
+
+        if matches.is_empty() {
+            println!("No templates match your search terms");
+            return Ok(());
+        }
+
+        for entry in matches {
+            println!("Template: {}\nDescription: {}\n", entry.title(), entry.summary());
+        }
+
+        Ok(())
+    }
+
     async fn run_template(&self, repo: String, id: String) -> anyhow::Result<()> {
         use spin_templates::*;
 
-        let tempdir = tempfile::tempdir().unwrap();
-        let template_manager = spin_templates::TemplateManager::in_dir(tempdir.path());
+        let manager = TemplateManager::try_default()?;
 
         let source = TemplateSource::try_from_git(&repo, &None, &crate::spin::version())?;
         let options = InstallOptions::default();
-        template_manager.install(&source, &options, &DiscardingProgressReporter).await?;
+        manager.install(&source, &options, &DiscardingProgressReporter).await?;
 
-        let template = template_manager.get(&id).unwrap().unwrap();
+        let template = manager.get(&id).unwrap().unwrap();
         let options = RunOptions {
             variant: TemplateVariantInfo::NewApplication,
-            name: self.name.clone(),
-            output_path: PathBuf::from(&self.name), // TODO: path safe,
+            name: self.name.clone().unwrap(), 
+            output_path: PathBuf::from(self.name.as_ref().unwrap()), 
             values: Default::default(),
             accept_defaults: false,
         };
@@ -55,7 +89,7 @@ impl NewCommand {
 
         match matches.len() {
             0 => {
-                println!("No templates matches your search terms");
+                println!("No templates match your search terms");
                 return Ok(None);
             }
             1 => {
@@ -91,9 +125,11 @@ impl NewCommand {
     }
 }
 
-fn get_repo_and_id(_: &hub_api::IndexEntry) -> anyhow::Result<(String, String)> {
-    // TODO: this
-    Ok(("https://github.com/karthik2804/spin-zola".to_owned(), "zola-ssg".to_owned()))
+fn get_repo_and_id(index_entry: &hub_api::IndexEntry) -> anyhow::Result<(String, String)> {
+    let repo_url = index_entry.url();
+    let template_id = index_entry.id(); 
+
+    Ok((repo_url, template_id))
 }
 
 struct DiscardingProgressReporter;
