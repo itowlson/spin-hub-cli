@@ -1,109 +1,90 @@
-use std::path::PathBuf;
-use clap::{Parser, ArgGroup};
+use clap::{Parser};
 use itertools::Itertools;
+use std::path::PathBuf;
 use crate::hub_api;
+use anyhow::{Context, Result};
+use std::io::{self, Write};
+
 
 #[derive(Parser, Debug)]
 #[clap(about = "Create an application from a template on the Hub")]
-#[clap(group(
-    ArgGroup::new("operation")
-        .required(true)
-        .args(&["list", "name"])
-))]
 pub struct NewCommand {
     #[clap(short = 't')]
     terms: Vec<String>,
-
-    #[clap(short, long)]
-    list: bool,
 
     #[clap(name = "name", help = "Name of the application to create from the template")]
     name: Option<String>,
 }
 
 impl NewCommand {
-    pub async fn run(&self) -> anyhow::Result<()> {
-        if self.list {
-            return self.list_templates().await;
-        }
-
-        if self.name.is_none() {
-            println!("Please provide a name for the application you want to create.");
-            return Ok(());
-        }
-
+    pub async fn run(&self) -> Result<()> {
+        
         let Some(index_entry) = self.resolve_selection().await? else {
             return Ok(());
         };
-
+    
         println!("Template {} by {}", index_entry.title(), index_entry.author());
         println!("{}", index_entry.summary());
-
+    
+        let app_name = if let Some(ref name) = self.name {
+            name.clone()
+        } else {
+            print!("Enter a name for your new application: ");
+            io::stdout().flush()?;
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            input.trim().to_string()
+        };
+    
         let (repo, id) = get_repo_and_id(&index_entry)?;
-
-        self.run_template(repo, id).await
+    
+        self.run_template(repo, id, app_name).await
     }
-
-    async fn list_templates(&self) -> anyhow::Result<()> {
-        let entries = hub_api::index().await.unwrap();
-        let matches = entries.iter()
-            .filter(|e| self.is_terms_match(e))
-            .sorted_by_key(|e| e.title())
-            .collect_vec();
-
-        if matches.is_empty() {
-            println!("No templates match your search terms");
-            return Ok(());
-        }
-
-        for entry in matches {
-            println!("Template: {}\nDescription: {}\n", entry.title(), entry.summary());
-        }
-
-        Ok(())
-    }
-
-    async fn run_template(&self, repo: String, id: String) -> anyhow::Result<()> {
+    
+    async fn run_template(&self, repo: String, id: String, app_name: String) -> Result<()> {
         use spin_templates::*;
-
-        let manager = TemplateManager::try_default()?;
-
+        
+        let tempdir = tempfile::tempdir().unwrap();
+        let manager = spin_templates::TemplateManager::in_dir(tempdir.path());
+    
         let source = TemplateSource::try_from_git(&repo, &None, &crate::spin::version())?;
         let options = InstallOptions::default();
         manager.install(&source, &options, &DiscardingProgressReporter).await?;
-
-        let template = manager.get(&id).unwrap().unwrap();
+    
+        let template = match manager.get(&id)? {
+            Some(template) => template,
+            None => return Err(anyhow::anyhow!("Template not found in the repository.")),
+        };
+            
         let options = RunOptions {
             variant: TemplateVariantInfo::NewApplication,
-            name: self.name.clone().unwrap(), 
-            output_path: PathBuf::from(self.name.as_ref().unwrap()), 
+            name: app_name.clone(),
+            output_path: PathBuf::from(&app_name),
             values: Default::default(),
             accept_defaults: false,
         };
+
         template.run(options).interactive().await
     }
 
-    async fn resolve_selection(&self) -> Result<Option<hub_api::IndexEntry>, dialoguer::Error> {
+    async fn resolve_selection(&self) -> Result<Option<hub_api::IndexEntry>> {
         let entries = hub_api::index().await.unwrap();
         let matches = entries.iter().filter(|e| self.is_match(e)).sorted_by_key(|e| e.title()).collect_vec();
 
-        match matches.len() {
-            0 => {
-                println!("No templates match your search terms");
-                return Ok(None);
-            }
-            1 => {
-                let index_entry = matches[0].clone();
-                return Ok(Some(index_entry))
-            },
-            _ => {
-                dialoguer::Select::new()
-                    .with_prompt("Several templates match your search. Use arrow keys and Enter to select, or Esc to cancel:")
-                    .items(&matches.iter().map(|e| e.title()).collect_vec())
-                    .interact_opt()?
-                    .map(|idx| Ok(matches[idx].clone()))
-                    .transpose()
-            }
+        if matches.is_empty() {
+            println!("No templates match your search terms");
+            return Ok(None);
+        }
+
+        let selection = dialoguer::Select::new()
+            .with_prompt("Select a template:")
+            .items(&matches.iter().map(|entry| format!("{} - {}", entry.title(), entry.summary())).collect_vec())
+            .interact_opt()?;
+
+        if let Some(idx) = selection {
+            Ok(Some(matches[idx].clone()))
+        } else {
+            Ok(None)
         }
     }
 
@@ -125,11 +106,11 @@ impl NewCommand {
     }
 }
 
-fn get_repo_and_id(index_entry: &hub_api::IndexEntry) -> anyhow::Result<(String, String)> {
-    let repo_url = index_entry.url();
-    let template_id = index_entry.id(); 
+fn get_repo_and_id(index_entry: &hub_api::IndexEntry) -> Result<(String, String)> {
+    let repo_url = index_entry.repo_url();
+    let template_id = index_entry.template_id(); 
 
-    Ok((repo_url, template_id))
+    Ok((repo_url.to_string(), template_id.to_string()))
 }
 
 struct DiscardingProgressReporter;
