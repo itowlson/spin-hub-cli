@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-const DEV_SITE_BASE: &'static str = "http://127.0.0.1:3000";
+const DEV_SITE_BASE: &'static str = "https://developer.fermyon.com";
 
 fn index_url() -> url::Url {
     url::Url::parse(DEV_SITE_BASE)

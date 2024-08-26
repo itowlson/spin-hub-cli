@@ -2,9 +2,7 @@ use clap::{Parser};
 use itertools::Itertools;
 use std::path::PathBuf;
 use crate::hub_api;
-use anyhow::{Context, Result};
-use std::io::{self, Write};
-
+use anyhow::Result;
 
 #[derive(Parser, Debug)]
 #[clap(about = "Create an application from a template on the Hub")]
@@ -18,35 +16,33 @@ pub struct NewCommand {
 
 impl NewCommand {
     pub async fn run(&self) -> Result<()> {
-        
         let Some(index_entry) = self.resolve_selection().await? else {
             return Ok(());
         };
-    
+
         println!("Template {} by {}", index_entry.title(), index_entry.author());
         println!("{}", index_entry.summary());
-    
+
         let app_name = if let Some(ref name) = self.name {
             name.clone()
         } else {
-            print!("Enter a name for your new application: ");
-            io::stdout().flush()?;
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            input.trim().to_string()
+            dialoguer::Input::<String>::new()
+                .with_prompt("Enter a name for your new application")
+                .interact_text()?
+                .trim()
+                .to_string()
         };
     
         let (repo, id) = get_repo_and_id(&index_entry)?;
-    
         self.run_template(repo, id, app_name).await
     }
-    
+
     async fn run_template(&self, repo: String, id: String, app_name: String) -> Result<()> {
         use spin_templates::*;
-        
+
         let tempdir = tempfile::tempdir().unwrap();
         let manager = spin_templates::TemplateManager::in_dir(tempdir.path());
-    
+
         let source = TemplateSource::try_from_git(&repo, &None, &crate::spin::version())?;
         let options = InstallOptions::default();
         manager.install(&source, &options, &DiscardingProgressReporter).await?;
@@ -67,24 +63,27 @@ impl NewCommand {
         template.run(options).interactive().await
     }
 
-    async fn resolve_selection(&self) -> Result<Option<hub_api::IndexEntry>> {
+    async fn resolve_selection(&self) -> Result<Option<hub_api::IndexEntry>, dialoguer::Error> {
         let entries = hub_api::index().await.unwrap();
         let matches = entries.iter().filter(|e| self.is_match(e)).sorted_by_key(|e| e.title()).collect_vec();
 
-        if matches.is_empty() {
-            println!("No templates match your search terms");
-            return Ok(None);
-        }
-
-        let selection = dialoguer::Select::new()
-            .with_prompt("Select a template:")
-            .items(&matches.iter().map(|entry| format!("{} - {}", entry.title(), entry.summary())).collect_vec())
-            .interact_opt()?;
-
-        if let Some(idx) = selection {
-            Ok(Some(matches[idx].clone()))
-        } else {
-            Ok(None)
+        match matches.len() {
+            0 => {
+                println!("No templates matches your search terms");
+                return Ok(None);
+            }
+            1 => {
+                let index_entry = matches[0].clone();
+                return Ok(Some(index_entry))
+            },
+            _ => {
+                dialoguer::Select::new()
+                    .with_prompt("Select a template:")
+                    .items(&matches.iter().map(|entry| format!("{} - {}", entry.title(), entry.summary())).collect_vec())
+                    .interact_opt()?
+                    .map(|idx| Ok(matches[idx].clone()))
+                    .transpose()
+            }
         }
     }
 
@@ -116,6 +115,5 @@ fn get_repo_and_id(index_entry: &hub_api::IndexEntry) -> Result<(String, String)
 struct DiscardingProgressReporter;
 
 impl spin_templates::ProgressReporter for DiscardingProgressReporter {
-    fn report(&self, _message: impl AsRef<str>) {
-    }
+    fn report(&self, _message: impl AsRef<str>) {}
 }
