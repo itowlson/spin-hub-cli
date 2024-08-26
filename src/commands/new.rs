@@ -1,9 +1,8 @@
-use std::path::PathBuf;
-
 use clap::{Parser};
 use itertools::Itertools;
-
+use std::path::PathBuf;
 use crate::hub_api;
+use anyhow::Result;
 
 #[derive(Parser, Debug)]
 #[clap(about = "Create an application from a template on the Hub")]
@@ -11,11 +10,12 @@ pub struct NewCommand {
     #[clap(short = 't')]
     terms: Vec<String>,
 
-    name: String,
+    #[clap(name = "name", help = "Name of the application to create from the template")]
+    name: Option<String>,
 }
 
 impl NewCommand {
-    pub async fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&self) -> Result<()> {
         let Some(index_entry) = self.resolve_selection().await? else {
             return Ok(());
         };
@@ -23,29 +23,43 @@ impl NewCommand {
         println!("Template {} by {}", index_entry.title(), index_entry.author());
         println!("{}", index_entry.summary());
 
+        let app_name = if let Some(ref name) = self.name {
+            name.clone()
+        } else {
+            dialoguer::Input::<String>::new()
+                .with_prompt("Enter a name for your new application")
+                .interact_text()?
+                .trim()
+                .to_string()
+        };
+    
         let (repo, id) = get_repo_and_id(&index_entry)?;
-
-        self.run_template(repo, id).await
+        self.run_template(repo, id, app_name).await
     }
 
-    async fn run_template(&self, repo: String, id: String) -> anyhow::Result<()> {
+    async fn run_template(&self, repo: String, id: String, app_name: String) -> Result<()> {
         use spin_templates::*;
 
         let tempdir = tempfile::tempdir().unwrap();
-        let template_manager = spin_templates::TemplateManager::in_dir(tempdir.path());
+        let manager = spin_templates::TemplateManager::in_dir(tempdir.path());
 
         let source = TemplateSource::try_from_git(&repo, &None, &crate::spin::version())?;
         let options = InstallOptions::default();
-        template_manager.install(&source, &options, &DiscardingProgressReporter).await?;
-
-        let template = template_manager.get(&id).unwrap().unwrap();
+        manager.install(&source, &options, &DiscardingProgressReporter).await?;
+    
+        let template = match manager.get(&id)? {
+            Some(template) => template,
+            None => return Err(anyhow::anyhow!("Template not found in the repository.")),
+        };
+            
         let options = RunOptions {
             variant: TemplateVariantInfo::NewApplication,
-            name: self.name.clone(),
-            output_path: PathBuf::from(&self.name), // TODO: path safe,
+            name: app_name.clone(),
+            output_path: PathBuf::from(&app_name),
             values: Default::default(),
             accept_defaults: false,
         };
+
         template.run(options).interactive().await
     }
 
@@ -64,8 +78,8 @@ impl NewCommand {
             },
             _ => {
                 dialoguer::Select::new()
-                    .with_prompt("Several templates match your search. Use arrow keys and Enter to select, or Esc to cancel:")
-                    .items(&matches.iter().map(|e| e.title()).collect_vec())
+                    .with_prompt("Select a template:")
+                    .items(&matches.iter().map(|entry| format!("{} - {}", entry.title(), entry.summary())).collect_vec())
                     .interact_opt()?
                     .map(|idx| Ok(matches[idx].clone()))
                     .transpose()
@@ -91,14 +105,15 @@ impl NewCommand {
     }
 }
 
-fn get_repo_and_id(_: &hub_api::IndexEntry) -> anyhow::Result<(String, String)> {
-    // TODO: this
-    Ok(("https://github.com/karthik2804/spin-zola".to_owned(), "zola-ssg".to_owned()))
+fn get_repo_and_id(index_entry: &hub_api::IndexEntry) -> Result<(String, String)> {
+    let repo_url = index_entry.repo_url();
+    let template_id = index_entry.template_id(); 
+
+    Ok((repo_url.to_string(), template_id.to_string()))
 }
 
 struct DiscardingProgressReporter;
 
 impl spin_templates::ProgressReporter for DiscardingProgressReporter {
-    fn report(&self, _message: impl AsRef<str>) {
-    }
+    fn report(&self, _message: impl AsRef<str>) {}
 }
