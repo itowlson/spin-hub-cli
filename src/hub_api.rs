@@ -38,6 +38,7 @@ pub struct IndexEntry {
     tags: Vec<String>,
     repo_url: String,
     template_id: String,
+    subdirectory: String,
     #[allow(dead_code)]
     path: String,
 }
@@ -95,6 +96,10 @@ impl IndexEntry {
     
     pub fn template_id(&self) -> &str {
         &self.template_id
+    }
+
+    pub fn subdirectory(&self) -> &str {
+        &self.subdirectory
     }
 }
 
