@@ -1,12 +1,12 @@
-use std::path::PathBuf;
-
-use clap::{Parser};
+use std::path::{PathBuf, Path};
+use std::fs;
+use clap::Parser;
 use itertools::Itertools;
-
+use fs_extra::dir::{copy, CopyOptions};
 use crate::{hub_api, git};
 
 #[derive(Parser, Debug)]
-#[clap(about = "Create an application from a template on the Hub")]
+#[clap(about = "Get a sample from a Hub")]
 pub struct RunCommand {
     #[clap(short = 't')]
     terms: Vec<String>,
@@ -33,29 +33,108 @@ impl RunCommand {
             return Ok(());
         }
 
-        let (repo, manifest_path) = get_repo_and_manifest_path(&index_entry)?;
+        let (repo, subdirectory) = get_repo_and_directory(&index_entry)?;
 
-        git::clone_decoupled(&repo).await?;
 
-        let clone_dir = git::clone_dir(&repo)?;
+        let repo_name = repo.split('/').last().unwrap().replace(".git", "");
+        let clone_dir = PathBuf::from(&repo_name);
 
-        let manifest_path = PathBuf::from(&clone_dir).join(manifest_path);
+        let cloned = clone_dir.exists();
+        if !cloned {
 
-        // TODO: DAMMIT THERE ARE SO MANY PIPENVS AND NPMS AND STUFF
+            println!("Cloning repository: {:?}", repo);
+            git::clone_decoupled(&repo).await?;
+        }
 
-        let verb = if self.deploy {
-            "deploy"
-        } else {
-            "up"
-        };
-        
-        let mut child = crate::spin::bin()
+        if !subdirectory.is_empty() {
+            let sample_dir = clone_dir.join(&subdirectory);
+
+            println!("Checking sub-directory path: {:?}", sample_dir);
+
+
+            if !self.is_safe_path(&sample_dir)? {
+                return Err(anyhow::anyhow!("Unsafe directory path detected."));
+            }
+
+            if !sample_dir.exists() {
+                return Err(anyhow::anyhow!("Specified sample directory does not exist: {:?}", sample_dir));
+            }
+
+
+            let mut options = CopyOptions::new();
+            options.skip_exist = true; 
+
+
+            let new_dir = PathBuf::from(".").join(sample_dir.file_name().unwrap());
+            println!("Copying sub-directory to current directory: {:?}", new_dir);
+            copy(&sample_dir, ".", &options)?;
+
+
+            if clone_dir.exists() {
+                println!("Deleting cloned repository at: {:?}", clone_dir);
+                match fs::remove_dir_all(&clone_dir) {
+                    Ok(_) => println!("Successfully deleted cloned repository."),
+                    Err(e) => eprintln!("Failed to delete cloned repository: {:?}", e),
+                }
+            }
+
+
+            std::env::set_current_dir(&new_dir)?;
+            println!("Changed working directory to: {:?}", new_dir);
+
+
+            let verb = if self.deploy {
+                "deploy"
+            } else {
+                "up"
+            };
+
+            let mut child = match crate::spin::bin() {
+                Ok(command) => command,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return Err(e); 
+                }
+            }
             .arg(verb)
             .args(["--build", "-f"])
-            .arg(manifest_path)
+            .arg("spin.toml")
             .spawn()?;
 
-        _ = child.wait().await;
+            _ = child.wait().await;
+        } else {
+            std::env::set_current_dir(&clone_dir)?;
+            println!("Running command in cloned repository root: {:?}", clone_dir);
+
+            let verb = if self.deploy {
+                "deploy"
+            } else {
+                "up"
+            };
+
+            let mut child = match crate::spin::bin() {
+                Ok(command) => command,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return Err(e); 
+                }
+            }
+            .arg(verb)
+            .args(["--build", "-f"])
+            .arg("spin.toml")
+            .spawn()?;
+
+            _ = child.wait().await;
+
+
+            if clone_dir.exists() {
+                println!("Deleting cloned repository at: {:?}", clone_dir);
+                match fs::remove_dir_all(&clone_dir) {
+                    Ok(_) => println!("Successfully deleted cloned repository."),
+                    Err(e) => eprintln!("Failed to delete cloned repository: {:?}", e),
+                }
+            }
+        }
 
         Ok(())
     }
@@ -66,7 +145,7 @@ impl RunCommand {
 
         match matches.len() {
             0 => {
-                println!("No templates matches your search terms");
+                println!("No templates match your search terms");
                 return Ok(None);
             }
             1 => {
@@ -100,9 +179,22 @@ impl RunCommand {
     fn is_category_match(&self, index_entry: &hub_api::IndexEntry) -> bool {
         index_entry.category() == hub_api::Category::Sample
     }
+
+    fn is_safe_path(&self, path: &Path) -> anyhow::Result<bool> {
+        let path_str = path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
+        if path_str.contains("..") || path_str.contains(";") || path_str.contains("$") {
+            return Ok(false);
+        }
+        Ok(true)
+    }
 }
 
-fn get_repo_and_manifest_path(_: &hub_api::IndexEntry) -> anyhow::Result<(String, String)> {
-    // TODO: this
-    Ok(("https://github.com/mikkelhegn/redirect".to_owned(), "spin.toml".to_owned()))
+fn get_repo_and_directory(index_entry: &hub_api::IndexEntry) -> anyhow::Result<(String, String)> {
+    // Extract the repository URL
+    let repo_url = index_entry.repo_url().to_owned();
+    
+    // Get the subdirectory directly
+    let directory = index_entry.subdirectory();
+    
+    Ok((repo_url, directory.to_owned()))
 }
