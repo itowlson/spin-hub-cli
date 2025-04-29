@@ -1,6 +1,8 @@
+use std::borrow::Cow;
+
 use itertools::Itertools;
 
-const DEV_SITE_BASE: &'static str = "https://developer.fermyon.com";
+const DEV_SITE_BASE: &'static str = "https://spinframework.dev";
 
 fn index_url() -> url::Url {
     url::Url::parse(DEV_SITE_BASE)
@@ -36,8 +38,8 @@ pub struct IndexEntry {
     language: String,
     author: String,
     tags: Vec<String>,
-    repo_url: String,
-    template_id: String,
+    repo_url: Option<String>,
+    template_id: Option<String>,
     #[allow(dead_code)]
     path: String,
 }
@@ -49,18 +51,19 @@ impl IndexEntry {
         &self.title
     }
 
-    pub fn summary(&self) -> &str {
-        &self.summary
+    pub fn summary(&self) -> Cow<'_, str> {
+        html_escape::decode_html_entities(&self.summary)
     }
 
-    pub fn short_summary(&self) -> String {
-        if self.summary.len() < SHORT_SUMMARY_LEN {
-            self.summary.clone()
+    pub fn short_summary(&self) -> Cow<'_, str> {
+        let summary = self.summary();
+        if summary.len() < SHORT_SUMMARY_LEN {
+            summary
         } else {
             let suffix = "...";
             let max_len = SHORT_SUMMARY_LEN - suffix.len();
-            let truncated = truncate_to_word_boundary(&self.summary, max_len, 5);
-            format!("{truncated}{suffix}")
+            let truncated = truncate_to_word_boundary(summary.as_ref(), max_len, 5);
+            Cow::Owned(format!("{truncated}{suffix}"))
         }
     }
 
@@ -89,12 +92,12 @@ impl IndexEntry {
     pub fn title_words(&self) -> Vec<String> {
         self.title.split_whitespace().map(|t| t.to_lowercase()).collect_vec()
     }
-    pub fn repo_url(&self) -> &str {
-        &self.repo_url
+    pub fn repo_url(&self) -> Option<&String> {
+        self.repo_url.as_ref()
     }
     
-    pub fn template_id(&self) -> &str {
-        &self.template_id
+    pub fn template_id(&self) -> Option<&String> {
+        self.template_id.as_ref()
     }
 }
 

@@ -1,4 +1,4 @@
-use clap::{Parser};
+use clap::Parser;
 use itertools::Itertools;
 
 use crate::hub_api;
@@ -37,7 +37,7 @@ impl SearchCommand {
 
         for entry in entries {
             let summary = entry.short_summary();
-            let row = vec![entry.title(), summary.as_str(), entry.author()];
+            let row = vec![entry.title(), summary.as_ref(), entry.author()];
             table.add_row(row);
         }
 

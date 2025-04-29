@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser};
+use clap::Parser;
 use itertools::Itertools;
 
 use crate::{hub_api, git};

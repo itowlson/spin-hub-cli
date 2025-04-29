@@ -1,4 +1,4 @@
-use clap::{Parser};
+use clap::Parser;
 
 mod commands;
 mod git;

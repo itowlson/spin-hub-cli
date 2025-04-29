@@ -1,5 +1,5 @@
 pub fn version() -> String {
-    std::env::var("SPIN_VERSION").unwrap_or_else(|_| "2.0.0".to_owned())
+    std::env::var("SPIN_VERSION").unwrap_or_else(|_| "3.0.0".to_owned())
 }
 
 pub fn bin() -> tokio::process::Command {

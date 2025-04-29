@@ -1,8 +1,8 @@
-use clap::{Parser};
+use clap::Parser;
 use itertools::Itertools;
 use std::path::PathBuf;
 use crate::hub_api;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Create an application from a template on the Hub")]
@@ -58,6 +58,8 @@ impl NewCommand {
             output_path: PathBuf::from(&app_name),
             values: Default::default(),
             accept_defaults: false,
+            allow_overwrite: false,
+            no_vcs: false,
         };
 
         template.run(options).interactive().await
@@ -106,8 +108,8 @@ impl NewCommand {
 }
 
 fn get_repo_and_id(index_entry: &hub_api::IndexEntry) -> Result<(String, String)> {
-    let repo_url = index_entry.repo_url();
-    let template_id = index_entry.template_id(); 
+    let template_id = index_entry.template_id().ok_or_else(|| anyhow!("hub entry '{}' has no template ID", index_entry.title()))?;
+    let repo_url = index_entry.repo_url().ok_or_else(|| anyhow!("hub template {template_id} has no repo"))?;
 
     Ok((repo_url.to_string(), template_id.to_string()))
 }
