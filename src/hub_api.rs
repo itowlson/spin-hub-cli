@@ -40,6 +40,7 @@ pub struct IndexEntry {
     tags: Vec<String>,
     repo_url: Option<String>,
     template_id: Option<String>,
+    url: String,
     #[allow(dead_code)]
     path: String,
 }
@@ -92,12 +93,17 @@ impl IndexEntry {
     pub fn title_words(&self) -> Vec<String> {
         self.title.split_whitespace().map(|t| t.to_lowercase()).collect_vec()
     }
+
     pub fn repo_url(&self) -> Option<&String> {
         self.repo_url.as_ref()
     }
     
     pub fn template_id(&self) -> Option<&String> {
         self.template_id.as_ref()
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
     }
 }
 
